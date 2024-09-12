@@ -31,13 +31,16 @@ def read_pdf_files(folder_name):
 
     for filename in pdf_files:
         file_path = os.path.join(folder_path, filename)
-        with open(file_path, 'rb') as file:
-            pdf_reader = PdfReader(file)
-            text = ""
-            for page in pdf_reader.pages:
-                text += page.extract_text() + "\n"
-            cleaned_text = clean_text(text)
-            pdf_contents.append({"filename": filename, "content": cleaned_text})
+        try:
+            with open(file_path, 'rb') as file:
+                pdf_reader = PdfReader(file)
+                text = ""
+                for page in pdf_reader.pages:
+                    text += page.extract_text() + "\n"
+                cleaned_text = clean_text(text)
+                pdf_contents.append({"filename": filename, "content": cleaned_text})
+        except Exception as e:
+            st.error(f"Error reading {filename}: {str(e)}")
     return pdf_contents
 
 # Read PDF files from the 'catalogs' folder
@@ -49,18 +52,31 @@ def get_product_recommendation(user_input, pdf_contents):
     if not pdf_contents:
         return "No catalog data available for recommendations."
     model = genai.GenerativeModel('gemini-pro')
-    context = "\n".join([f"Catalog {i+1} ({content['filename']}): {content['content'][:1000]}..." for i, content in enumerate(pdf_contents)])
-    prompt = f"""Based on the following catalog excerpts, recommend a product for this request: "{user_input}"
+    
+    # Combine all catalog contents
+    all_content = "\n\n".join([f"Catalog: {content['filename']}\n{content['content']}" for content in pdf_contents])
+    
+    prompt = f"""You are a knowledgeable sales assistant with access to product catalogs. 
+    Based on the following catalog contents, recommend a product for this customer request: "{user_input}"
+    
     If you can't find a specific product, suggest the most relevant category or type of product.
     Always provide a recommendation, even if it's not an exact match.
+    If you find multiple suitable products, list up to three options.
     
-    Catalog excerpts:
-    {context}
+    Catalog contents:
+    {all_content}
     
-    Remember, these are just excerpts. The full catalogs likely contain more products.
+    Please format your response as follows:
+    1. Recommended Product(s): [List the product(s) here]
+    2. Reason for Recommendation: [Explain why you recommended this product]
+    3. Additional Information: [Provide any relevant details about the product(s)]
     """
-    response = model.generate_content(prompt)
-    return response.text
+    
+    try:
+        response = model.generate_content(prompt, max_output_tokens=1000)
+        return response.text
+    except Exception as e:
+        return f"An error occurred while generating recommendations: {str(e)}"
 
 # Streamlit app
 st.title('Smart Product Selection App')
@@ -80,13 +96,21 @@ else:
 
     if user_input:
         # Get product recommendation
-        recommendation = get_product_recommendation(user_input, pdf_contents)
+        with st.spinner("Generating recommendation..."):
+            recommendation = get_product_recommendation(user_input, pdf_contents)
         st.subheader("Recommended Product:")
         st.write(recommendation)
 
     # Debug information
     if st.checkbox("Show debugging information"):
-        st.subheader("Catalog Contents (First 500 characters of each):")
+        st.subheader("Catalog Contents:")
         for pdf in pdf_contents:
             st.write(f"**{pdf['filename']}**")
-            st.write(pdf['content'][:500] + "...")
+            st.write(f"Total characters: {len(pdf['content'])}")
+            st.text_area(f"Preview of {pdf['filename']}", pdf['content'][:1000] + "...", height=200)
+
+# Display any errors that occurred during PDF processing
+if 'errors' in st.session_state and st.session_state.errors:
+    st.error("Errors occurred while processing PDFs:")
+    for error in st.session_state.errors:
+        st.write(error)
