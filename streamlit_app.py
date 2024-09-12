@@ -14,8 +14,8 @@ def clean_text(text):
     return text.strip()
 
 def extract_products(text):
-    # This is a simple pattern matching. You might need to adjust based on your catalog format
-    pattern = r'([\w\s]+)\s*\$([\d,]+\.?\d*)\s*(.+?)\s*(?=\$|\Z)'
+    # Improved pattern matching for product extraction
+    pattern = r'(\S+(?:\s+\S+){0,5})\s*\$\s*([\d,]+(?:\.\d{2})?)\s*(.+?)(?=\$|\Z)'
     matches = re.findall(pattern, text, re.DOTALL)
     products = [{'name': clean_text(m[0]), 'price': m[1], 'description': clean_text(m[2])} for m in matches]
     return products
@@ -52,30 +52,31 @@ def get_product_recommendation(user_input, pdf_contents):
     if not pdf_contents:
         return "No catalog data available for recommendations."
     
-    # Prepare TF-IDF vectorizer
-    all_products = [p for pdf in pdf_contents for p in pdf['products']]
+    all_products = []
+    for pdf in pdf_contents:
+        for product in pdf['products']:
+            all_products.append({**product, 'catalog': pdf['filename']})
+    
     product_texts = [f"{p['name']} {p['description']}" for p in all_products]
     vectorizer = TfidfVectorizer(stop_words='english')
     product_vectors = vectorizer.fit_transform(product_texts)
     
-    # Vectorize user input
     user_vector = vectorizer.transform([user_input])
-    
-    # Calculate similarity
     similarities = cosine_similarity(user_vector, product_vectors).flatten()
     
-    # Get top 5 matches
     top_indices = similarities.argsort()[-5:][::-1]
     
     recommendations = []
     for index in top_indices:
         product = all_products[index]
-        recommendations.append(f"Product: {product['name']}")
-        recommendations.append(f"Price: ${product['price']}")
-        recommendations.append(f"Description: {product['description']}")
-        recommendations.append("")
+        recommendations.append({
+            'name': product['name'],
+            'price': product['price'],
+            'description': product['description'],
+            'catalog': product['catalog']
+        })
     
-    return "\n".join(recommendations)
+    return recommendations
 
 # Streamlit app
 st.title('Smart Product Selection App')
@@ -100,9 +101,18 @@ else:
     if user_input:
         # Get product recommendation
         with st.spinner("Generating recommendation..."):
-            recommendation = get_product_recommendation(user_input, pdf_contents)
+            recommendations = get_product_recommendation(user_input, pdf_contents)
+        
         st.subheader("Recommended Products:")
-        st.write(recommendation)
+        for i, product in enumerate(recommendations, 1):
+            st.markdown(f"""
+            **Product {i}:**
+            - **Name:** {product['name']}
+            - **Price:** ${product['price']}
+            - **Description:** {product['description']}
+            - **Catalog:** {product['catalog']}
+            """)
+            st.markdown("---")
 
     # Debug information
     if st.checkbox("Show debugging information"):
