@@ -1,15 +1,21 @@
 import streamlit as st
 import os
-import google.generativeai as genai
 from PyPDF2 import PdfReader
 import re
-
-# Configure Gemini AI using the secret from secrets.toml
-gemini_api_key = st.secrets["Gemini_API"]
-genai.configure(api_key=gemini_api_key)
+from transformers import BertTokenizer, BertForMaskedLM
+import torch
 
 # Get the absolute path of the script's directory
 script_dir = os.path.dirname(os.path.abspath(__file__))
+
+# Load BERT model and tokenizer
+@st.cache_resource
+def load_bert_model():
+    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+    model = BertForMaskedLM.from_pretrained('bert-base-uncased')
+    return tokenizer, model
+
+tokenizer, model = load_bert_model()
 
 def clean_text(text):
     # Remove extra whitespace and newlines
@@ -43,36 +49,41 @@ def read_pdf_files(folder_name):
             st.error(f"Error reading {filename}: {str(e)}")
     return pdf_contents
 
-# Function to get product recommendations using Gemini
+# Function to get product recommendations using BERT
 def get_product_recommendation(user_input, pdf_contents):
     if not pdf_contents:
         return "No catalog data available for recommendations."
-    model = genai.GenerativeModel('gemini-pro')
     
     # Combine all catalog contents
     all_content = "\n\n".join([f"Catalog: {content['filename']}\n{content['content']}" for content in pdf_contents])
     
-    prompt = f"""You are a knowledgeable sales assistant with access to product catalogs. 
-    Based on the following catalog contents, recommend a product for this customer request: "{user_input}"
+    # Prepare input for BERT
+    input_text = f"Customer request: {user_input}\n\nCatalog contents: {all_content[:5000]}"  # Limit to 5000 chars for performance
+    inputs = tokenizer(input_text, return_tensors="pt", truncation=True, max_length=512, padding=True)
     
-    If you can't find a specific product, suggest the most relevant category or type of product.
-    Always provide a recommendation, even if it's not an exact match.
-    If you find multiple suitable products, list up to three options.
+    # Generate mask tokens for recommendation
+    mask_token_index = torch.where(inputs["input_ids"] == tokenizer.mask_token_id)[1]
     
-    Catalog contents:
-    {all_content}
+    # If no mask token, add one at the end
+    if len(mask_token_index) == 0:
+        inputs["input_ids"] = torch.cat([inputs["input_ids"], torch.tensor([[tokenizer.mask_token_id]])], dim=-1)
+        inputs["attention_mask"] = torch.cat([inputs["attention_mask"], torch.tensor([[1]])], dim=-1)
+        mask_token_index = torch.tensor([inputs["input_ids"].shape[1] - 1])
     
-    Please format your response as follows:
-    1. Recommended Product(s): [List the product(s) here]
-    2. Reason for Recommendation: [Explain why you recommended this product]
-    3. Additional Information: [Provide any relevant details about the product(s)]
-    """
+    with torch.no_grad():
+        outputs = model(**inputs)
     
-    try:
-        response = model.generate_content(prompt)
-        return response.text
-    except Exception as e:
-        return f"An error occurred while generating recommendations: {str(e)}"
+    logits = outputs.logits
+    softmax = torch.nn.functional.softmax(logits, dim=-1)
+    mask_word_prob = softmax[0, mask_token_index, :]
+    top_5_words = torch.topk(mask_word_prob, 5, dim=-1).indices[0].tolist()
+    
+    recommended_words = tokenizer.decode(top_5_words)
+    
+    return f"""Based on the customer request and catalog contents, here are some recommended product keywords:
+    {recommended_words}
+    
+    Please note that these are general suggestions based on the available information. For more specific recommendations, please consult the full product catalogs."""
 
 # Streamlit app
 st.title('Smart Product Selection App')
@@ -98,7 +109,7 @@ else:
         # Get product recommendation
         with st.spinner("Generating recommendation..."):
             recommendation = get_product_recommendation(user_input, pdf_contents)
-        st.subheader("Recommended Product:")
+        st.subheader("Recommended Products:")
         st.write(recommendation)
 
     # Debug information
