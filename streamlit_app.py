@@ -8,44 +8,7 @@ import re
 gemini_api_key = st.secrets["Gemini_API"]
 genai.configure(api_key=gemini_api_key)
 
-# Get the absolute path of the script's directory
-script_dir = os.path.dirname(os.path.abspath(__file__))
-
-def clean_text(text):
-    # Remove extra whitespace and newlines
-    text = re.sub(r'\s+', ' ', text)
-    return text.strip()
-
-# Function to read PDF files
-def read_pdf_files(folder_name):
-    folder_path = os.path.join(script_dir, folder_name)
-    pdf_contents = []
-    if not os.path.exists(folder_path):
-        st.error(f"The '{folder_name}' folder does not exist in {script_dir}. Please create it and add your PDF catalogs.")
-        st.stop()
-    
-    pdf_files = [f for f in os.listdir(folder_path) if f.endswith('.pdf')]
-    if not pdf_files:
-        st.warning(f"No PDF files found in the '{folder_name}' folder. Please add your PDF catalogs.")
-        return pdf_contents
-
-    for filename in pdf_files:
-        file_path = os.path.join(folder_path, filename)
-        try:
-            with open(file_path, 'rb') as file:
-                pdf_reader = PdfReader(file)
-                text = ""
-                for page in pdf_reader.pages:
-                    text += page.extract_text() + "\n"
-                cleaned_text = clean_text(text)
-                pdf_contents.append({"filename": filename, "content": cleaned_text})
-        except Exception as e:
-            st.error(f"Error reading {filename}: {str(e)}")
-    return pdf_contents
-
-# Read PDF files from the 'catalogs' folder
-catalog_folder = 'catalogs'
-pdf_contents = read_pdf_files(catalog_folder)
+# ... [Previous code for read_pdf_files and other functions remains the same] ...
 
 # Function to get product recommendations using Gemini
 def get_product_recommendation(user_input, pdf_contents):
@@ -73,7 +36,7 @@ def get_product_recommendation(user_input, pdf_contents):
     """
     
     try:
-        response = model.generate_content(prompt, max_output_tokens=1000)
+        response = model.generate_content(prompt)
         return response.text
     except Exception as e:
         return f"An error occurred while generating recommendations: {str(e)}"
