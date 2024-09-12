@@ -30,18 +30,44 @@ def extract_products(text, catalog_name):
             })
     return products
 
+def validate_product(product):
+    errors = []
+    
+    # Validate Name
+    if not isinstance(product['name'], str) or len(product['name']) < 2:
+        errors.append("Invalid name")
+    
+    # Validate Price
+    try:
+        price = float(product['price'].replace(',', ''))
+        if price <= 0:
+            errors.append("Invalid price")
+    except ValueError:
+        errors.append("Invalid price format")
+    
+    # Validate Catalog
+    if not isinstance(product['catalog'], str) or not product['catalog'].endswith('.pdf'):
+        errors.append("Invalid catalog name")
+    
+    # Validate Description
+    if not isinstance(product['description'], str) or len(product['description']) < 5:
+        errors.append("Invalid description")
+    
+    return errors
+
 def process_catalogs(folder_name):
     folder_path = os.path.join(script_dir, folder_name)
     all_products = []
+    invalid_products = []
     
     if not os.path.exists(folder_path):
         st.error(f"The '{folder_name}' folder does not exist in {script_dir}. Please create it and add your PDF catalogs.")
-        return all_products
+        return all_products, invalid_products
     
     pdf_files = [f for f in os.listdir(folder_path) if f.endswith('.pdf')]
     if not pdf_files:
         st.warning(f"No PDF files found in the '{folder_name}' folder. Please add your PDF catalogs.")
-        return all_products
+        return all_products, invalid_products
 
     for filename in pdf_files:
         file_path = os.path.join(folder_path, filename)
@@ -53,11 +79,18 @@ def process_catalogs(folder_name):
                     text += page.extract_text() + "\n"
                 cleaned_text = clean_text(text)
                 products = extract_products(cleaned_text, filename)
-                all_products.extend(products)
+                
+                for product in products:
+                    errors = validate_product(product)
+                    if errors:
+                        invalid_products.append((product, errors))
+                    else:
+                        all_products.append(product)
+                        
         except Exception as e:
             st.error(f"Error reading {filename}: {str(e)}")
     
-    return all_products
+    return all_products, invalid_products
 
 def match_products_to_brief(project_brief, products, top_n=5):
     if not products:
@@ -79,7 +112,7 @@ st.title('Smart Product Selection App')
 
 # Process catalogs and build product library
 catalog_folder = 'catalogs'
-products = process_catalogs(catalog_folder)
+products, invalid_products = process_catalogs(catalog_folder)
 
 if not products:
     st.info("To use this app, please follow these steps:")
@@ -89,7 +122,10 @@ if not products:
     3. Restart the Streamlit app.
     """)
 else:
-    st.write(f"Loaded {len(products)} products from catalogs successfully.")
+    st.write(f"Loaded {len(products)} valid products from catalogs successfully.")
+    
+    if invalid_products:
+        st.warning(f"Found {len(invalid_products)} invalid products. Check debug information for details.")
     
     # User input for project brief
     project_brief = st.text_area("Enter your project brief:")
@@ -113,10 +149,17 @@ else:
     # Debug information
     if st.checkbox("Show debugging information"):
         st.subheader("Product Library Overview:")
-        st.write(f"Total products: {len(products)}")
-        st.write("Sample products:")
+        st.write(f"Total valid products: {len(products)}")
+        st.write("Sample valid products:")
         for product in products[:5]:
             st.json(product)
+        
+        if invalid_products:
+            st.subheader("Invalid Products:")
+            for product, errors in invalid_products:
+                st.json(product)
+                st.write(f"Errors: {', '.join(errors)}")
+                st.markdown("---")
 
 # Display any errors that occurred during processing
 if 'errors' in st.session_state and st.session_state.errors:
