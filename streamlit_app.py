@@ -61,28 +61,37 @@ def get_product_recommendation(user_input, pdf_contents):
     input_text = f"Customer request: {user_input}\n\nCatalog contents: {all_content}"
     
     # Tokenize and truncate
-    inputs = tokenizer(input_text, return_tensors="pt", truncation=True, max_length=511, padding=True)
+    tokens = tokenizer.tokenize(input_text)
+    if len(tokens) > 510:  # Reserve 2 spots: 1 for [CLS] and 1 for [MASK]
+        tokens = tokens[:510]
+    tokens.append('[MASK]')
     
-    # Add mask token
-    inputs["input_ids"] = torch.cat([inputs["input_ids"], torch.tensor([[tokenizer.mask_token_id]])], dim=-1)
-    inputs["attention_mask"] = torch.cat([inputs["attention_mask"], torch.tensor([[1]])], dim=-1)
+    # Convert tokens to ids and create attention mask
+    input_ids = tokenizer.convert_tokens_to_ids(['[CLS]'] + tokens)
+    attention_mask = [1] * len(input_ids)
     
-    mask_token_index = torch.where(inputs["input_ids"] == tokenizer.mask_token_id)[1]
+    # Pad sequences to max length
+    padding_length = 512 - len(input_ids)
+    input_ids += [tokenizer.pad_token_id] * padding_length
+    attention_mask += [0] * padding_length
+    
+    # Convert to tensors
+    input_ids = torch.tensor([input_ids])
+    attention_mask = torch.tensor([attention_mask])
     
     with torch.no_grad():
-        outputs = model(**inputs)
+        outputs = model(input_ids=input_ids, attention_mask=attention_mask)
     
     logits = outputs.logits
-    softmax = torch.nn.functional.softmax(logits, dim=-1)
-    mask_word_prob = softmax[0, mask_token_index, :]
-    top_5_words = torch.topk(mask_word_prob, 5, dim=-1).indices[0].tolist()
+    mask_token_index = (input_ids == tokenizer.mask_token_id).nonzero(as_tuple=True)[1]
     
-    recommended_words = tokenizer.decode(top_5_words)
+    predicted_token_id = logits[0, mask_token_index].argmax(axis=-1)
+    predicted_token = tokenizer.decode(predicted_token_id)
     
-    return f"""Based on the customer request and catalog contents, here are some recommended product keywords:
-    {recommended_words}
+    return f"""Based on the customer request and catalog contents, a recommended product or category might be:
+    {predicted_token}
     
-    Please note that these are general suggestions based on the available information. For more specific recommendations, please consult the full product catalogs."""
+    Please note that this is a general suggestion based on the available information. For more specific recommendations, please consult the full product catalogs."""
 
 # Streamlit app
 st.title('Smart Product Selection App')
@@ -108,7 +117,7 @@ else:
         # Get product recommendation
         with st.spinner("Generating recommendation..."):
             recommendation = get_product_recommendation(user_input, pdf_contents)
-        st.subheader("Recommended Products:")
+        st.subheader("Recommended Product or Category:")
         st.write(recommendation)
 
     # Debug information
