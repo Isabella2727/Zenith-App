@@ -2,7 +2,6 @@ import streamlit as st
 import os
 import google.generativeai as genai
 from PyPDF2 import PdfReader
-import pandas as pd
 
 # Configure Gemini AI using the secret from secrets.toml
 gemini_api_key = st.secrets["Gemini_API"]
@@ -59,6 +58,8 @@ if not pdf_contents:
     3. Restart the Streamlit app.
     """)
 else:
+    st.write(f"Loaded {len(pdf_contents)} catalog(s) successfully.")
+    
     # User input
     user_input = st.text_input("Describe what you're looking for:")
 
@@ -68,18 +69,7 @@ else:
         st.subheader("Recommended Product:")
         st.write(recommendation)
 
-    # Display catalog information
-    st.subheader("Available Catalogs")
-    for pdf in pdf_contents:
-        st.write(f"- {pdf['filename']}")
-
-    # Option to view catalog contents
-    if pdf_contents:
-        selected_catalog = st.selectbox("Select a catalog to view:", [pdf['filename'] for pdf in pdf_contents])
-        if selected_catalog:
-            selected_content = next(pdf['content'] for pdf in pdf_contents if pdf['filename'] == selected_catalog)
-            st.text_area("Catalog Content (first 1000 characters):", selected_content[:1000], height=200)
-
-# Display the current working directory and script directory for debugging
-st.sidebar.write(f"Current Working Directory: {os.getcwd()}")
-st.sidebar.write(f"Script Directory: {script_dir}")
+# Optional: Display the current working directory and script directory for debugging
+# Uncomment these lines if you need to debug file paths
+# st.sidebar.write(f"Current Working Directory: {os.getcwd()}")
+# st.sidebar.write(f"Script Directory: {script_dir}")
