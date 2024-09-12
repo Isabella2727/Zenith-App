@@ -10,28 +10,38 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 
 def clean_text(text):
     # Remove extra whitespace and newlines
-    text = re.sub(r'\s+', ' ', text)
-    return text.strip()
+    return re.sub(r'\s+', ' ', text).strip()
 
-def extract_products(text):
+def extract_products(text, catalog_name):
     # Improved pattern matching for product extraction
     pattern = r'(\S+(?:\s+\S+){0,5})\s*\$\s*([\d,]+(?:\.\d{2})?)\s*(.+?)(?=\$|\Z)'
     matches = re.findall(pattern, text, re.DOTALL)
-    products = [{'name': clean_text(m[0]), 'price': m[1], 'description': clean_text(m[2])} for m in matches]
+    products = []
+    for m in matches:
+        name = clean_text(m[0])
+        price = m[1]
+        description = clean_text(m[2])
+        if name and price and description:
+            products.append({
+                'name': name,
+                'price': price,
+                'catalog': catalog_name,
+                'description': description
+            })
     return products
 
-# Function to read PDF files
-def read_pdf_files(folder_name):
+def process_catalogs(folder_name):
     folder_path = os.path.join(script_dir, folder_name)
-    pdf_contents = []
+    all_products = []
+    
     if not os.path.exists(folder_path):
         st.error(f"The '{folder_name}' folder does not exist in {script_dir}. Please create it and add your PDF catalogs.")
-        return pdf_contents
+        return all_products
     
     pdf_files = [f for f in os.listdir(folder_path) if f.endswith('.pdf')]
     if not pdf_files:
         st.warning(f"No PDF files found in the '{folder_name}' folder. Please add your PDF catalogs.")
-        return pdf_contents
+        return all_products
 
     for filename in pdf_files:
         file_path = os.path.join(folder_path, filename)
@@ -42,50 +52,36 @@ def read_pdf_files(folder_name):
                 for page in pdf_reader.pages:
                     text += page.extract_text() + "\n"
                 cleaned_text = clean_text(text)
-                products = extract_products(cleaned_text)
-                pdf_contents.append({"filename": filename, "products": products})
+                products = extract_products(cleaned_text, filename)
+                all_products.extend(products)
         except Exception as e:
             st.error(f"Error reading {filename}: {str(e)}")
-    return pdf_contents
+    
+    return all_products
 
-def get_product_recommendation(user_input, pdf_contents):
-    if not pdf_contents:
-        return "No catalog data available for recommendations."
+def match_products_to_brief(project_brief, products, top_n=5):
+    if not products:
+        return []
     
-    all_products = []
-    for pdf in pdf_contents:
-        for product in pdf['products']:
-            all_products.append({**product, 'catalog': pdf['filename']})
-    
-    product_texts = [f"{p['name']} {p['description']}" for p in all_products]
+    product_texts = [f"{p['name']} {p['description']}" for p in products]
     vectorizer = TfidfVectorizer(stop_words='english')
     product_vectors = vectorizer.fit_transform(product_texts)
     
-    user_vector = vectorizer.transform([user_input])
-    similarities = cosine_similarity(user_vector, product_vectors).flatten()
+    brief_vector = vectorizer.transform([project_brief])
+    similarities = cosine_similarity(brief_vector, product_vectors).flatten()
     
-    top_indices = similarities.argsort()[-5:][::-1]
+    top_indices = similarities.argsort()[-top_n:][::-1]
     
-    recommendations = []
-    for index in top_indices:
-        product = all_products[index]
-        recommendations.append({
-            'name': product['name'],
-            'price': product['price'],
-            'description': product['description'],
-            'catalog': product['catalog']
-        })
-    
-    return recommendations
+    return [products[i] for i in top_indices]
 
 # Streamlit app
 st.title('Smart Product Selection App')
 
-# Read PDF files from the 'catalogs' folder
+# Process catalogs and build product library
 catalog_folder = 'catalogs'
-pdf_contents = read_pdf_files(catalog_folder)
+products = process_catalogs(catalog_folder)
 
-if not pdf_contents:
+if not products:
     st.info("To use this app, please follow these steps:")
     st.markdown(f"""
     1. Ensure there's a folder named 'catalogs' in this directory: {script_dir}
@@ -93,39 +89,37 @@ if not pdf_contents:
     3. Restart the Streamlit app.
     """)
 else:
-    st.write(f"Loaded {len(pdf_contents)} catalog(s) successfully.")
+    st.write(f"Loaded {len(products)} products from catalogs successfully.")
     
-    # User input
-    user_input = st.text_input("Describe what you're looking for:")
+    # User input for project brief
+    project_brief = st.text_area("Enter your project brief:")
 
-    if user_input:
-        # Get product recommendation
-        with st.spinner("Generating recommendation..."):
-            recommendations = get_product_recommendation(user_input, pdf_contents)
+    if project_brief:
+        # Match products to project brief
+        with st.spinner("Matching products to your project brief..."):
+            matched_products = match_products_to_brief(project_brief, products)
         
-        st.subheader("Recommended Products:")
-        for i, product in enumerate(recommendations, 1):
+        st.subheader("Matching Products:")
+        for i, product in enumerate(matched_products, 1):
             st.markdown(f"""
             **Product {i}:**
             - **Name:** {product['name']}
             - **Price:** ${product['price']}
-            - **Description:** {product['description']}
             - **Catalog:** {product['catalog']}
+            - **Description:** {product['description']}
             """)
             st.markdown("---")
 
     # Debug information
     if st.checkbox("Show debugging information"):
-        st.subheader("Extracted Products:")
-        for pdf in pdf_contents:
-            st.write(f"**{pdf['filename']}**")
-            st.write(f"Total products extracted: {len(pdf['products'])}")
-            if pdf['products']:
-                st.write("Sample product:")
-                st.json(pdf['products'][0])
+        st.subheader("Product Library Overview:")
+        st.write(f"Total products: {len(products)}")
+        st.write("Sample products:")
+        for product in products[:5]:
+            st.json(product)
 
-# Display any errors that occurred during PDF processing
+# Display any errors that occurred during processing
 if 'errors' in st.session_state and st.session_state.errors:
-    st.error("Errors occurred while processing PDFs:")
+    st.error("Errors occurred during processing:")
     for error in st.session_state.errors:
         st.write(error)
