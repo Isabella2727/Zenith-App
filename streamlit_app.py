@@ -2,20 +2,12 @@ import streamlit as st
 import os
 from PyPDF2 import PdfReader
 import re
-from transformers import BertTokenizer, BertForMaskedLM
-import torch
+from collections import Counter
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 
 # Get the absolute path of the script's directory
 script_dir = os.path.dirname(os.path.abspath(__file__))
-
-# Load BERT model and tokenizer
-@st.cache_resource
-def load_bert_model():
-    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-    model = BertForMaskedLM.from_pretrained('bert-base-uncased')
-    return tokenizer, model
-
-tokenizer, model = load_bert_model()
 
 def clean_text(text):
     # Remove extra whitespace and newlines
@@ -49,49 +41,50 @@ def read_pdf_files(folder_name):
             st.error(f"Error reading {filename}: {str(e)}")
     return pdf_contents
 
-# Function to get product recommendations using BERT
+def extract_keywords(text, n=5):
+    # Simple keyword extraction using TF-IDF
+    vectorizer = TfidfVectorizer(stop_words='english')
+    tfidf_matrix = vectorizer.fit_transform([text])
+    feature_names = vectorizer.get_feature_names_out()
+    dense = tfidf_matrix.todense()
+    scores = dense.tolist()[0]
+    scores_with_features = [(score, feature) for score, feature in zip(scores, feature_names)]
+    sorted_scores = sorted(scores_with_features, reverse=True)
+    return [feature for score, feature in sorted_scores[:n]]
+
 def get_product_recommendation(user_input, pdf_contents):
     if not pdf_contents:
         return "No catalog data available for recommendations."
     
-    # Combine all catalog contents
-    all_content = "\n\n".join([f"Catalog: {content['filename']}\n{content['content']}" for content in pdf_contents])
+    # Extract keywords from user input
+    user_keywords = extract_keywords(user_input)
     
-    # Prepare input for BERT
-    input_text = f"Customer request: {user_input}\n\nCatalog contents: {all_content}"
+    # Extract keywords from each catalog
+    catalog_keywords = []
+    for pdf in pdf_contents:
+        keywords = extract_keywords(pdf['content'], n=20)
+        catalog_keywords.append({'filename': pdf['filename'], 'keywords': keywords})
     
-    # Tokenize and truncate
-    tokens = tokenizer.tokenize(input_text)
-    if len(tokens) > 510:  # Reserve 2 spots: 1 for [CLS] and 1 for [MASK]
-        tokens = tokens[:510]
-    tokens.append('[MASK]')
+    # Find best matching catalogs
+    best_matches = []
+    for catalog in catalog_keywords:
+        common_keywords = set(user_keywords) & set(catalog['keywords'])
+        if common_keywords:
+            best_matches.append((catalog['filename'], len(common_keywords), common_keywords))
     
-    # Convert tokens to ids and create attention mask
-    input_ids = tokenizer.convert_tokens_to_ids(['[CLS]'] + tokens)
-    attention_mask = [1] * len(input_ids)
+    best_matches.sort(key=lambda x: x[1], reverse=True)
     
-    # Pad sequences to max length
-    padding_length = 512 - len(input_ids)
-    input_ids += [tokenizer.pad_token_id] * padding_length
-    attention_mask += [0] * padding_length
+    if not best_matches:
+        return "No specific product recommendations found. Please try a different search term."
     
-    # Convert to tensors
-    input_ids = torch.tensor([input_ids])
-    attention_mask = torch.tensor([attention_mask])
+    recommendations = []
+    for match in best_matches[:2]:  # Get top 2 matches
+        filename, _, keywords = match
+        recommendations.append(f"Catalog: {filename}")
+        recommendations.append(f"Relevant keywords: {', '.join(keywords)}")
+        recommendations.append("")
     
-    with torch.no_grad():
-        outputs = model(input_ids=input_ids, attention_mask=attention_mask)
-    
-    logits = outputs.logits
-    mask_token_index = (input_ids == tokenizer.mask_token_id).nonzero(as_tuple=True)[1]
-    
-    predicted_token_id = logits[0, mask_token_index].argmax(axis=-1)
-    predicted_token = tokenizer.decode(predicted_token_id)
-    
-    return f"""Based on the customer request and catalog contents, a recommended product or category might be:
-    {predicted_token}
-    
-    Please note that this is a general suggestion based on the available information. For more specific recommendations, please consult the full product catalogs."""
+    return "\n".join(recommendations)
 
 # Streamlit app
 st.title('Smart Product Selection App')
@@ -117,7 +110,7 @@ else:
         # Get product recommendation
         with st.spinner("Generating recommendation..."):
             recommendation = get_product_recommendation(user_input, pdf_contents)
-        st.subheader("Recommended Product or Category:")
+        st.subheader("Recommended Products or Categories:")
         st.write(recommendation)
 
     # Debug information
