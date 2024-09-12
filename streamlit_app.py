@@ -2,6 +2,7 @@ import streamlit as st
 import os
 import google.generativeai as genai
 from PyPDF2 import PdfReader
+import re
 
 # Configure Gemini AI using the secret from secrets.toml
 gemini_api_key = st.secrets["Gemini_API"]
@@ -9,6 +10,11 @@ genai.configure(api_key=gemini_api_key)
 
 # Get the absolute path of the script's directory
 script_dir = os.path.dirname(os.path.abspath(__file__))
+
+def clean_text(text):
+    # Remove extra whitespace and newlines
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip()
 
 # Function to read PDF files
 def read_pdf_files(folder_name):
@@ -29,8 +35,9 @@ def read_pdf_files(folder_name):
             pdf_reader = PdfReader(file)
             text = ""
             for page in pdf_reader.pages:
-                text += page.extract_text()
-            pdf_contents.append({"filename": filename, "content": text})
+                text += page.extract_text() + "\n"
+            cleaned_text = clean_text(text)
+            pdf_contents.append({"filename": filename, "content": cleaned_text})
     return pdf_contents
 
 # Read PDF files from the 'catalogs' folder
@@ -42,8 +49,16 @@ def get_product_recommendation(user_input, pdf_contents):
     if not pdf_contents:
         return "No catalog data available for recommendations."
     model = genai.GenerativeModel('gemini-pro')
-    context = "\n".join([f"Catalog {i+1}: {content['content'][:500]}..." for i, content in enumerate(pdf_contents)])
-    prompt = f"Based on the following catalogs:\n{context}\n\nRecommend a product for this request: {user_input}"
+    context = "\n".join([f"Catalog {i+1} ({content['filename']}): {content['content'][:1000]}..." for i, content in enumerate(pdf_contents)])
+    prompt = f"""Based on the following catalog excerpts, recommend a product for this request: "{user_input}"
+    If you can't find a specific product, suggest the most relevant category or type of product.
+    Always provide a recommendation, even if it's not an exact match.
+    
+    Catalog excerpts:
+    {context}
+    
+    Remember, these are just excerpts. The full catalogs likely contain more products.
+    """
     response = model.generate_content(prompt)
     return response.text
 
@@ -69,7 +84,9 @@ else:
         st.subheader("Recommended Product:")
         st.write(recommendation)
 
-# Optional: Display the current working directory and script directory for debugging
-# Uncomment these lines if you need to debug file paths
-# st.sidebar.write(f"Current Working Directory: {os.getcwd()}")
-# st.sidebar.write(f"Script Directory: {script_dir}")
+    # Debug information
+    if st.checkbox("Show debugging information"):
+        st.subheader("Catalog Contents (First 500 characters of each):")
+        for pdf in pdf_contents:
+            st.write(f"**{pdf['filename']}**")
+            st.write(pdf['content'][:500] + "...")
