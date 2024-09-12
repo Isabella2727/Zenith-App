@@ -2,7 +2,6 @@ import streamlit as st
 import os
 from PyPDF2 import PdfReader
 import re
-from collections import Counter
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -13,6 +12,13 @@ def clean_text(text):
     # Remove extra whitespace and newlines
     text = re.sub(r'\s+', ' ', text)
     return text.strip()
+
+def extract_products(text):
+    # This is a simple pattern matching. You might need to adjust based on your catalog format
+    pattern = r'([\w\s]+)\s*\$([\d,]+\.?\d*)\s*(.+?)\s*(?=\$|\Z)'
+    matches = re.findall(pattern, text, re.DOTALL)
+    products = [{'name': clean_text(m[0]), 'price': m[1], 'description': clean_text(m[2])} for m in matches]
+    return products
 
 # Function to read PDF files
 def read_pdf_files(folder_name):
@@ -36,52 +42,37 @@ def read_pdf_files(folder_name):
                 for page in pdf_reader.pages:
                     text += page.extract_text() + "\n"
                 cleaned_text = clean_text(text)
-                pdf_contents.append({"filename": filename, "content": cleaned_text})
+                products = extract_products(cleaned_text)
+                pdf_contents.append({"filename": filename, "products": products})
         except Exception as e:
             st.error(f"Error reading {filename}: {str(e)}")
     return pdf_contents
-
-def extract_keywords(text, n=5):
-    # Simple keyword extraction using TF-IDF
-    vectorizer = TfidfVectorizer(stop_words='english')
-    tfidf_matrix = vectorizer.fit_transform([text])
-    feature_names = vectorizer.get_feature_names_out()
-    dense = tfidf_matrix.todense()
-    scores = dense.tolist()[0]
-    scores_with_features = [(score, feature) for score, feature in zip(scores, feature_names)]
-    sorted_scores = sorted(scores_with_features, reverse=True)
-    return [feature for score, feature in sorted_scores[:n]]
 
 def get_product_recommendation(user_input, pdf_contents):
     if not pdf_contents:
         return "No catalog data available for recommendations."
     
-    # Extract keywords from user input
-    user_keywords = extract_keywords(user_input)
+    # Prepare TF-IDF vectorizer
+    all_products = [p for pdf in pdf_contents for p in pdf['products']]
+    product_texts = [f"{p['name']} {p['description']}" for p in all_products]
+    vectorizer = TfidfVectorizer(stop_words='english')
+    product_vectors = vectorizer.fit_transform(product_texts)
     
-    # Extract keywords from each catalog
-    catalog_keywords = []
-    for pdf in pdf_contents:
-        keywords = extract_keywords(pdf['content'], n=20)
-        catalog_keywords.append({'filename': pdf['filename'], 'keywords': keywords})
+    # Vectorize user input
+    user_vector = vectorizer.transform([user_input])
     
-    # Find best matching catalogs
-    best_matches = []
-    for catalog in catalog_keywords:
-        common_keywords = set(user_keywords) & set(catalog['keywords'])
-        if common_keywords:
-            best_matches.append((catalog['filename'], len(common_keywords), common_keywords))
+    # Calculate similarity
+    similarities = cosine_similarity(user_vector, product_vectors).flatten()
     
-    best_matches.sort(key=lambda x: x[1], reverse=True)
-    
-    if not best_matches:
-        return "No specific product recommendations found. Please try a different search term."
+    # Get top 5 matches
+    top_indices = similarities.argsort()[-5:][::-1]
     
     recommendations = []
-    for match in best_matches[:2]:  # Get top 2 matches
-        filename, _, keywords = match
-        recommendations.append(f"Catalog: {filename}")
-        recommendations.append(f"Relevant keywords: {', '.join(keywords)}")
+    for index in top_indices:
+        product = all_products[index]
+        recommendations.append(f"Product: {product['name']}")
+        recommendations.append(f"Price: ${product['price']}")
+        recommendations.append(f"Description: {product['description']}")
         recommendations.append("")
     
     return "\n".join(recommendations)
@@ -110,16 +101,18 @@ else:
         # Get product recommendation
         with st.spinner("Generating recommendation..."):
             recommendation = get_product_recommendation(user_input, pdf_contents)
-        st.subheader("Recommended Products or Categories:")
+        st.subheader("Recommended Products:")
         st.write(recommendation)
 
     # Debug information
     if st.checkbox("Show debugging information"):
-        st.subheader("Catalog Contents:")
+        st.subheader("Extracted Products:")
         for pdf in pdf_contents:
             st.write(f"**{pdf['filename']}**")
-            st.write(f"Total characters: {len(pdf['content'])}")
-            st.text_area(f"Preview of {pdf['filename']}", pdf['content'][:1000] + "...", height=200)
+            st.write(f"Total products extracted: {len(pdf['products'])}")
+            if pdf['products']:
+                st.write("Sample product:")
+                st.json(pdf['products'][0])
 
 # Display any errors that occurred during PDF processing
 if 'errors' in st.session_state and st.session_state.errors:
