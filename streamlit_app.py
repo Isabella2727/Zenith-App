@@ -58,17 +58,16 @@ def get_product_recommendation(user_input, pdf_contents):
     all_content = "\n\n".join([f"Catalog: {content['filename']}\n{content['content']}" for content in pdf_contents])
     
     # Prepare input for BERT
-    input_text = f"Customer request: {user_input}\n\nCatalog contents: {all_content[:5000]}"  # Limit to 5000 chars for performance
-    inputs = tokenizer(input_text, return_tensors="pt", truncation=True, max_length=512, padding=True)
+    input_text = f"Customer request: {user_input}\n\nCatalog contents: {all_content}"
     
-    # Generate mask tokens for recommendation
+    # Tokenize and truncate
+    inputs = tokenizer(input_text, return_tensors="pt", truncation=True, max_length=511, padding=True)
+    
+    # Add mask token
+    inputs["input_ids"] = torch.cat([inputs["input_ids"], torch.tensor([[tokenizer.mask_token_id]])], dim=-1)
+    inputs["attention_mask"] = torch.cat([inputs["attention_mask"], torch.tensor([[1]])], dim=-1)
+    
     mask_token_index = torch.where(inputs["input_ids"] == tokenizer.mask_token_id)[1]
-    
-    # If no mask token, add one at the end
-    if len(mask_token_index) == 0:
-        inputs["input_ids"] = torch.cat([inputs["input_ids"], torch.tensor([[tokenizer.mask_token_id]])], dim=-1)
-        inputs["attention_mask"] = torch.cat([inputs["attention_mask"], torch.tensor([[1]])], dim=-1)
-        mask_token_index = torch.tensor([inputs["input_ids"].shape[1] - 1])
     
     with torch.no_grad():
         outputs = model(**inputs)
