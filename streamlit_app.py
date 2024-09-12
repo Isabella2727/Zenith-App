@@ -4,8 +4,11 @@ import google.generativeai as genai
 from PyPDF2 import PdfReader
 import pandas as pd
 
-# Configure Gemini AI using the stored secret
-genai.configure(api_key=st.secrets["Gemini_API"])
+# Configure Gemini AI using the secret from secrets.toml
+gemini_api_key = st.secrets["Gemini_API"]  # Updated to match the secret name
+genai.configure(api_key=gemini_api_key)
+
+# Rest of the code remains the same...
 
 # Function to read PDF files
 def read_pdf_files(folder_path):
