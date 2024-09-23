@@ -1,31 +1,42 @@
-import streamlit as st
-import os
-from PyPDF2 import PdfReader
-import re
+from sklearn.model_selection import train_test_split
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-# Get the absolute path of the script's directory
-script_dir = os.path.dirname(os.path.abspath(__file__))
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.pipeline import Pipeline
 
-def clean_text(text):
-    # Remove extra whitespace and newlines
-    return re.sub(r'\s+', ' ', text).strip()
+# Assume you have lists of text samples and corresponding labels
+texts = ["Product A $100", "Description: High-quality item", ...]
+labels = ["product_name", "description", ...]
 
-def extract_products(text, catalog_name):
-    pattern = r'([^$\n]+)\s*\$\s*([\d,]+(?:\.\d{2})?)\s*(.+?)(?=\$|\Z)'
-    matches = re.findall(pattern, text, re.DOTALL)
-    products = []
-    for m in matches:
-        name = clean_text(m[0])
-        price = m[1]
-        description = clean_text(m[2])
-        if name and price and description and not name.startswith('$'):
-            products.append({
-                'name': name,
-                'price': price,
-                'catalog': catalog_name,
-                'description': description
-            })
+# Split the data
+X_train, X_test, y_train, y_test = train_test_split(texts, labels, test_size=0.2)
+
+# Create a pipeline
+pipeline = Pipeline([
+    ('tfidf', TfidfVectorizer()),
+    ('clf', RandomForestClassifier())
+])
+
+# Train the model
+pipeline.fit(X_train, y_train)
+
+# Use the model to make predictions
+predictions = pipeline.predict(X_test)
+
+# Evaluate the model
+from sklearn.metrics import classification_report
+print(classification_report(y_test, predictions))
+
+# Use the model in your app
+def process_pdf(pdf_text):
+    # Split the PDF text into chunks (you'd need to implement this based on your PDF structure)
+    chunks = split_pdf_text(pdf_text)
+    
+    # Classify each chunk
+    classifications = pipeline.predict(chunks)
+    
+    # Process the classifications to extract product information
+    products = extract_products_from_classifications(chunks, classifications)
+    
     return products
 
 def validate_product(product):
