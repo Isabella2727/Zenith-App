@@ -4,7 +4,6 @@ from PyPDF2 import PdfReader
 import re
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-
 # Get the absolute path of the script's directory
 script_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -13,15 +12,14 @@ def clean_text(text):
     return re.sub(r'\s+', ' ', text).strip()
 
 def extract_products(text, catalog_name):
-    # Improved pattern matching for product extraction
-    pattern = r'(\S+(?:\s+\S+){0,5})\s*\$\s*([\d,]+(?:\.\d{2})?)\s*(.+?)(?=\$|\Z)'
+    pattern = r'([^$\n]+)\s*\$\s*([\d,]+(?:\.\d{2})?)\s*(.+?)(?=\$|\Z)'
     matches = re.findall(pattern, text, re.DOTALL)
     products = []
     for m in matches:
         name = clean_text(m[0])
         price = m[1]
         description = clean_text(m[2])
-        if name and price and description:
+        if name and price and description and not name.startswith('$'):
             products.append({
                 'name': name,
                 'price': price,
