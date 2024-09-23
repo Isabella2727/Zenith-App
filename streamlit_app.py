@@ -1,177 +1,35 @@
-from sklearn.model_selection import train_test_split
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.pipeline import Pipeline
+import os
+import fitz  # PyMuPDF
+import pandas as pd
+from tqdm import tqdm
 
-# Assume you have lists of text samples and corresponding labels
-texts = ["Product A $100", "Description: High-quality item", ...]
-labels = ["product_name", "description", ...]
+def pdf_to_text(pdf_path):
+    doc = fitz.open(pdf_path)
+    text = ""
+    for page in doc:
+        text += page.get_text()
+    return text
 
-# Split the data
-X_train, X_test, y_train, y_test = train_test_split(texts, labels, test_size=0.2)
-
-# Create a pipeline
-pipeline = Pipeline([
-    ('tfidf', TfidfVectorizer()),
-    ('clf', RandomForestClassifier())
-])
-
-# Train the model
-pipeline.fit(X_train, y_train)
-
-# Use the model to make predictions
-predictions = pipeline.predict(X_test)
-
-# Evaluate the model
-from sklearn.metrics import classification_report
-print(classification_report(y_test, predictions))
-
-# Use the model in your app
-def process_pdf(pdf_text):
-    # Split the PDF text into chunks (you'd need to implement this based on your PDF structure)
-    chunks = split_pdf_text(pdf_text)
+def process_pdfs(input_dir, output_file):
+    data = []
+    pdf_files = [f for f in os.listdir(input_dir) if f.endswith('.pdf')]
     
-    # Classify each chunk
-    classifications = pipeline.predict(chunks)
-    
-    # Process the classifications to extract product information
-    products = extract_products_from_classifications(chunks, classifications)
-    
-    return products
-
-def validate_product(product):
-    errors = []
-    
-    # Validate Name
-    if not isinstance(product['name'], str) or len(product['name']) < 2:
-        errors.append("Invalid name")
-    
-    # Validate Price
-    try:
-        price = float(product['price'].replace(',', ''))
-        if price <= 0:
-            errors.append("Invalid price")
-    except ValueError:
-        errors.append("Invalid price format")
-    
-    # Validate Catalog
-    if not isinstance(product['catalog'], str) or not product['catalog'].endswith('.pdf'):
-        errors.append("Invalid catalog name")
-    
-    # Validate Description
-    if not isinstance(product['description'], str) or len(product['description']) < 5:
-        errors.append("Invalid description")
-    
-    return errors
-
-def process_catalogs(folder_name):
-    folder_path = os.path.join(script_dir, folder_name)
-    all_products = []
-    invalid_products = []
-    
-    if not os.path.exists(folder_path):
-        st.error(f"The '{folder_name}' folder does not exist in {script_dir}. Please create it and add your PDF catalogs.")
-        return all_products, invalid_products
-    
-    pdf_files = [f for f in os.listdir(folder_path) if f.endswith('.pdf')]
-    if not pdf_files:
-        st.warning(f"No PDF files found in the '{folder_name}' folder. Please add your PDF catalogs.")
-        return all_products, invalid_products
-
-    for filename in pdf_files:
-        file_path = os.path.join(folder_path, filename)
+    for pdf_file in tqdm(pdf_files, desc="Processing PDFs"):
+        pdf_path = os.path.join(input_dir, pdf_file)
         try:
-            with open(file_path, 'rb') as file:
-                pdf_reader = PdfReader(file)
-                text = ""
-                for page in pdf_reader.pages:
-                    text += page.extract_text() + "\n"
-                cleaned_text = clean_text(text)
-                products = extract_products(cleaned_text, filename)
-                
-                for product in products:
-                    errors = validate_product(product)
-                    if errors:
-                        invalid_products.append((product, errors))
-                    else:
-                        all_products.append(product)
-                        
+            text = pdf_to_text(pdf_path)
+            data.append({
+                'filename': pdf_file,
+                'text': text
+            })
         except Exception as e:
-            st.error(f"Error reading {filename}: {str(e)}")
+            print(f"Error processing {pdf_file}: {str(e)}")
     
-    return all_products, invalid_products
+    df = pd.DataFrame(data)
+    df.to_csv(output_file, index=False)
+    print(f"Processed {len(data)} PDF files. Output saved to {output_file}")
 
-def match_products_to_brief(project_brief, products, top_n=5):
-    if not products:
-        return []
-    
-    product_texts = [f"{p['name']} {p['description']}" for p in products]
-    vectorizer = TfidfVectorizer(stop_words='english')
-    product_vectors = vectorizer.fit_transform(product_texts)
-    
-    brief_vector = vectorizer.transform([project_brief])
-    similarities = cosine_similarity(brief_vector, product_vectors).flatten()
-    
-    top_indices = similarities.argsort()[-top_n:][::-1]
-    
-    return [products[i] for i in top_indices]
-
-# Streamlit app
-st.title('Smart Product Selection App')
-
-# Process catalogs and build product library
-catalog_folder = 'catalogs'
-products, invalid_products = process_catalogs(catalog_folder)
-
-if not products:
-    st.info("To use this app, please follow these steps:")
-    st.markdown(f"""
-    1. Ensure there's a folder named 'catalogs' in this directory: {script_dir}
-    2. Add your PDF catalog files to the 'catalogs' folder.
-    3. Restart the Streamlit app.
-    """)
-else:
-    st.write(f"Loaded {len(products)} valid products from catalogs successfully.")
-    
-    if invalid_products:
-        st.warning(f"Found {len(invalid_products)} invalid products. Check debug information for details.")
-    
-    # User input for project brief
-    project_brief = st.text_area("Enter your project brief:")
-
-    if project_brief:
-        # Match products to project brief
-        with st.spinner("Matching products to your project brief..."):
-            matched_products = match_products_to_brief(project_brief, products)
-        
-        st.subheader("Matching Products:")
-        for i, product in enumerate(matched_products, 1):
-            st.markdown(f"""
-            **Product {i}:**
-            - **Name:** {product['name']}
-            - **Price:** ${product['price']}
-            - **Catalog:** {product['catalog']}
-            - **Description:** {product['description']}
-            """)
-            st.markdown("---")
-
-    # Debug information
-    if st.checkbox("Show debugging information"):
-        st.subheader("Product Library Overview:")
-        st.write(f"Total valid products: {len(products)}")
-        st.write("Sample valid products:")
-        for product in products[:5]:
-            st.json(product)
-        
-        if invalid_products:
-            st.subheader("Invalid Products:")
-            for product, errors in invalid_products:
-                st.json(product)
-                st.write(f"Errors: {', '.join(errors)}")
-                st.markdown("---")
-
-# Display any errors that occurred during processing
-if 'errors' in st.session_state and st.session_state.errors:
-    st.error("Errors occurred during processing:")
-    for error in st.session_state.errors:
-        st.write(error)
+if __name__ == "__main__":
+    input_dir = "data/raw_pdfs"
+    output_file = "data/processed_text/pdf_contents.csv"
+    process_pdfs(input_dir, output_file)

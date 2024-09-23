@@ -1,19 +1,26 @@
-# 🎈 Blank app template
+# PDF Catalog Processor
 
-A simple Streamlit app template for you to modify!
+This project processes PDF catalogs for machine learning-based information extraction.
 
-[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://blank-app-template.streamlit.app/)
+## Setup
 
-### How to run it on your own machine
+1. Clone the repository
+2. Create a virtual environment: `python -m venv venv`
+3. Activate the virtual environment:
+   - On Unix or MacOS: `source venv/bin/activate`
+   - On Windows: `venv\Scripts\activate`
+4. Install dependencies: `pip install -r requirements.txt`
 
-1. Install the requirements
+## Usage
 
-   ```
-   $ pip install -r requirements.txt
-   ```
+1. Place your PDF catalogs in the `data/raw_pdfs` directory
+2. Run the processing script: `python scripts/process_pdfs.py`
+3. Processed data will be saved in `data/processed_text/pdf_contents.csv`
 
-2. Run the app
+## Directory Structure
 
-   ```
-   $ streamlit run streamlit_app.py
-   ```
+- `data/`
+  - `raw_pdfs/`: Place your PDF catalogs here
+  - `processed_text/`: Contains processed text data
+- `scripts/`: Python scripts for data processing
+- `venv/`: Virtual environment (not tracked by git)
